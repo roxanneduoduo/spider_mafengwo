@@ -4,6 +4,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 import os.path
 import time
+import json
 
 
 chrome_options = Options()
@@ -32,7 +33,7 @@ def get_city_url(init_url):
 		for a_link in dd.find_all('a'):
 			if a_link.text != '':
 				city_code = a_link['href'].split('/')[-1].split('.')[0]
-				cities_url_dict[a_link.text] = {'code': a_link['href']}
+				cities_url_dict[a_link.text] = {'code': city_code}
 
 
 	for dt in dt_list:
@@ -56,7 +57,8 @@ def get_city_url_from_citylist_page(dt_code):
 			cities_url_dict[city] = {'code': city_code}
 
 	try:
-		next_page_link = driver.find_element_by_xpath('//div[@id="citylistpagination"]/div/a[contains(@class, "pg-next")]')
+		next_page_link = \
+			driver.find_element_by_xpath('//div[@id="citylistpagination"]/div/a[contains(@class, "pg-next")]')
 
 		while next_page_link:
 			next_page_link.click()
@@ -68,18 +70,18 @@ def get_city_url_from_citylist_page(dt_code):
 				if cities_url_dict.get(city, None) is None:
 					city_code = parent_a.get_attribute('href').split('/')[-1].split('.')[0]
 					cities_url_dict[city] = {'code': city_code}
-			next_page_link = driver.find_element_by_xpath('//div[@id="citylistpagination"]/div/a[contains(@class, "pg-next")]') or None
+			next_page_link = \
+				driver.find_element_by_xpath('//div[@id="citylistpagination"]/div/a[contains(@class, "pg-next")]') or None
 	except Exception as err:
 		print(err)
 
 	driver.close()
 
 
-def save_city_url_file():
-	get_city_url(mdd_url)
-	with open('cities_url.txt', 'w', encoding='utf-8') as f:
-		for k, v in cities_url_dict.items():
-			f.write(f"{k}: {v}\n")
+def save_city_info_file():
+	with open('cities_china.txt', 'w', encoding='utf-8') as f:
+		json_str = json.dumps(cities_url_dict)
+		f.write(json_str)
 
 
 def get_city_info(city_code):
@@ -118,19 +120,39 @@ def get_city_info(city_code):
 
 
 def get_city_food(city_code):
-	pass
+	url = base_url + '/cy/' + city_code + '/'
+	res = requests.get(url)
+	res.raise_for_status()
+
+	soup = BeautifulSoup(res.text, 'html.parser')
+	indexes = soup.select('ol.list-rank > li.rank-item em.r-num')
+	foods = soup.select('ol.list-rank > li > a > h3')
+	counts = soup.select('ol.list-rank > li > a > span.trend')
+	return {index.text: [food.text, count.text] for index, food, count in zip(indexes, foods, counts)}
 
 
-"""
-if not os.path.exists('cities_url.txt'):
-	save_city_url_file()
+def get_city_jingdian(city_code):
+	url = base_url + '/jd/' + city_code + '/gonglve.html'
+
+	res = requests.get(url)
+	res.raise_for_status()
+
+	soup = BeautifulSoup(res.text, 'html.parser')
+
+	jingdians = soup.select('div.item.clearfix h3 a')
+	indexes = soup.select('div.item.clearfix h3 > span.num')
+	jingdians_clear = [jingdians[i] for i in range(1, 10, 2)]
+	dianpings = soup.select('div.item.clearfix h3 span.rev-total > em')
+	return {index.text: [jingdian.attrs['title'], dianping.text] 
+		for index, jingdian, dianping in zip(indexes, jingdians_clear, dianpings)}
 
 
-with open('cities_url.txt', 'r') as f:
-	for line in f.readlines():
-		city, url = line.split(': ')
-		if not url.startswith('http://'):
-			url = base_url + url
+if __name__ == '__main__':
+	get_city_url(mdd_url)
+	for city, value in cities_url_dict:
+		city_code = city['code']
+		value['info'] = get_city_info(city_code)
+		value['food'] = get_city_food(city_code)
+		value['jd'] = get_city_jingdian(city_code)
 
-"""
-print(get_city_info('10065'))
+	save_city_info_file()
